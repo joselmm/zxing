@@ -21,28 +21,23 @@
   <main class="wrapper" style="padding-top:2em">
 
     <section class="container" id="demo-content">
-      <h1 class="title">Scan barcode from <code>&lt;img&gt;</code></h1>
+      <h1 class="title">Scan barcode from <code>&lt;input type="file"&gt;</code></h1>
 
       <p>
         <a class="button-small button-outline" href="../../index.html">HOME 🏡</a>
       </p>
 
       <p>
-        These examples show how to scan a barcode with ZXing javascript library from an image. The examples decode from
-        the
-        <code>src</code> in
-        <code>img</code> tag, however is also possible to decode directly from an url without an
-        <code>img</code> tag.
+        These examples show how to scan a barcode with ZXing javascript library from an uploaded image. You can upload
+        an image file directly to decode its barcode.
       </p>
 
       <div id="code-128">
         <h2 class="title">Scan barcode from Code 128</h2>
         <div>
-          <a class="button decodeButton">Decode</a>
+          <input type="file" class="file-input" accept="image/*" />
         </div>
-        <div>
-          <img class="img" src="../../resources/blackbox/code128-1/1.png" style="border: 1px solid gray" />
-        </div>
+        <img id="img-code128" width="300px" height="300px" />
         <label>Result:</label>
         <blockquote>
           <p class="result"></p>
@@ -55,11 +50,9 @@
       <div id="ean-13">
         <h2 class="title">Scan barcode from EAN-13</h2>
         <div>
-          <a class="button decodeButton">Decode</a>
+          <input type="file" class="file-input" accept="image/*" />
         </div>
-        <div>
-          <img class="img" src="../../resources/blackbox/ean13-1/1.png" style="border: 1px solid gray" />
-        </div>
+        <img id="img-ean13" width="300px" height="300px" />
         <label>Result:</label>
         <blockquote>
           <p class="result"></p>
@@ -72,11 +65,9 @@
       <div id="itf">
         <h2 class="title">Scan barcode from ITF</h2>
         <div>
-          <a class="button decodeButton">Decode</a>
+          <input type="file" class="file-input" accept="image/*" />
         </div>
-        <div>
-          <img class="img" src="../../resources/blackbox/itf/1.png" style="border: 1px solid gray" />
-        </div>
+        <img id="img-itf" width="300px" height="300px" />
         <label>Result:</label>
         <blockquote>
           <p class="result"></p>
@@ -103,34 +94,47 @@
   <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
   <script type="text/javascript">
     window.addEventListener('load', () => {
-
       const codeReader = new ZXing.BrowserBarcodeReader();
-
       console.log('ZXing code reader initialized');
 
-      const decodeFun = (e) => {
+      // Función para manejar la carga del archivo
+      const handleFileInput = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function (event) {
+            const img = new Image();
+            img.src = event.target.result;
 
-        const parent = e.target.parentNode.parentNode;
-        const img = parent.getElementsByClassName('img')[0].cloneNode(true);
-        const resultEl = parent.getElementsByClassName('result')[0];
+            img.onload = function () {
+              // Mostrar la imagen cargada en el contenedor de la imagen correspondiente
+              const imgContainer = e.target.parentNode.parentNode.querySelector('img');
+              imgContainer.src = img.src;
 
-        codeReader.decodeFromImage(img)
-          .then(result => {
-            console.log(result);
-            resultEl.textContent = result.text;
-          })
-          .catch(err => {
-            console.error(err);
-            resultEl.textContent = err;
-          });
-
-        console.log(`Started decode for image from ${img.src}`)
+              // Decodificar la imagen
+              codeReader.decodeFromImage(img)
+                .then(result => {
+                  console.log(result);
+                  const resultEl = e.target.parentNode.parentNode.querySelector('.result');
+                  resultEl.textContent = result.text;
+                })
+                .catch(err => {
+                  console.error(err);
+                  const resultEl = e.target.parentNode.parentNode.querySelector('.result');
+                  resultEl.textContent = "Error decoding barcode.";
+                });
+            };
+          };
+          reader.readAsDataURL(file);
+        }
       };
 
-      for (const element of document.getElementsByClassName('decodeButton')) {
-        element.addEventListener('click', decodeFun, false);
-      }
-    })
+      // Agregar el evento a cada input de archivo
+      const fileInputs = document.querySelectorAll('.file-input');
+      fileInputs.forEach(input => {
+        input.addEventListener('change', handleFileInput);
+      });
+    });
   </script>
 
 </body>

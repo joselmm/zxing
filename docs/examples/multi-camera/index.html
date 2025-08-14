@@ -7,7 +7,7 @@
 <style>
   body{font-family:system-ui,Arial;margin:1rem}
   .video-wrap{position:relative; max-width:900px; margin:0 auto;}
-  video{width:100%; height:auto; display:block; background:#000; object-fit:cover;}
+  video{width:100%; height:100px; display:block; background:#000; object-fit:cover;}
   /* overlay (scan area) */
   .scan-area{
     position:absolute;
@@ -47,6 +47,7 @@
 <script src="https://unpkg.com/@zxing/browser@latest"></script>
 <script>
 (async () => {
+  var barcodeAudio  = new Audio("./barcode-audio.ogg");
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
   const resetBtn = document.getElementById('resetBtn');
@@ -63,7 +64,7 @@
 
   let stream = null;
   let scanTimer = null;
-  const SCAN_INTERVAL_MS = 150; // ajustar para velocidad/CPU
+  const SCAN_INTERVAL_MS = 500; // ajustar para velocidad/CPU
 
   async function startCamera() {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
@@ -112,6 +113,7 @@ async function scanOnce() {
   try {
     const result = await codeReader.decodeFromCanvas(cropCanvas);
     resultEl.textContent = result.text;
+    barcodeAudio.play();
     stopScanning();
   } catch (err) {
     // detección segura de "NotFoundException" sin usar instanceof directo

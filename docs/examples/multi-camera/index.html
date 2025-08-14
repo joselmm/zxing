@@ -1,133 +1,191 @@
 <!doctype html>
-<html lang="en">
-
+<html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="author" content="ZXing for JS">
-
-  <title>ZXing TypeScript | Decoding from camera stream</title>
-  <style>
-    #result{
-      font-size: 4rem;
-    }
-  </style>
-
-  <link rel="stylesheet" rel="preload" as="style" onload="this.rel='stylesheet';this.onload=null"
-    href="https://fonts.googleapis.com/css?family=Roboto:300,300italic,700,700italic">
-  <link rel="stylesheet" rel="preload" as="style" onload="this.rel='stylesheet';this.onload=null"
-    href="https://unpkg.com/normalize.css@8.0.0/normalize.css">
-  <link rel="stylesheet" rel="preload" as="style" onload="this.rel='stylesheet';this.onload=null"
-    href="https://unpkg.com/milligram@1.3.0/dist/milligram.min.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ZXing - crop area example</title>
+<style>
+  body{font-family:system-ui,Arial;margin:1rem}
+  .video-wrap{position:relative; max-width:900px; margin:0 auto;}
+  video{width:100%; height:auto; display:block; background:#000; object-fit:cover;}
+  /* overlay (scan area) */
+  .scan-area{
+    position:absolute;
+    width:50%;          /* tamaño relativo al vídeo (ajusta aquí) */
+    height:28%;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    border:3px dashed rgba(0,255,0,0.9);
+    box-shadow: 0 0 12px rgba(0,255,0,0.15);
+    pointer-events:none;
+    box-sizing:border-box;
+  }
+  #result{font-size:1.25rem; margin-top:1rem; word-break:break-word}
+  .controls{margin-top:1rem; display:flex; gap:0.5rem}
+</style>
 </head>
-
 <body>
 
-  <main class="wrapper" style="padding-top:2em">
+<h2>Escanear sólo un área (crop) con ZXing</h2>
 
-    <section class="container" id="demo-content">
-      <h1 class="title">Scan 1D/2D Code from Video Camera</h1>
+<div class="video-wrap" id="videoWrap">
+  <video id="video" playsinline></video>
+  <div class="scan-area" id="scanArea"></div>
+</div>
 
-      <p>
-        <a class="button-small button-outline" href="../../index.html">HOME 🏡</a>
-      </p>
+<div class="controls">
+  <button id="startBtn">Start</button>
+  <button id="stopBtn" disabled>Stop</button>
+  <button id="resetBtn">Reset</button>
+</div>
 
-      <p>This example shows how to scan any supported 1D/2D code with ZXing javascript library from the device video
-        camera. If more
-        than one video input devices are available (for example front and back camera) the example shows how to read
-        them and use a select to change the input device.</p>
+<label>Resultado:</label>
+<pre id="result"></pre>
 
-      <div>
-        <a class="button" id="startButton">Start</a>
-        <a class="button" id="resetButton">Reset</a>
-      </div>
+<!-- ZXing browser (incluye decodeFromCanvas) -->
+<script src="https://unpkg.com/@zxing/browser@latest"></script>
+<script>
+(async () => {
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const video = document.getElementById('video');
+  const scanArea = document.getElementById('scanArea');
+  const resultEl = document.getElementById('result');
 
-      <div>
-       <video id="video" style="border: 1px solid gray; width:100%; height:auto; max-height:100vh; object-fit:contain;"></video>
+  // lector (BrowserMultiFormatReader usa decodeFromCanvas)
+  const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
-      </div>
+  // canvas offscreen para el crop
+  const cropCanvas = document.createElement('canvas');
+  const cropCtx = cropCanvas.getContext('2d');
 
-      <div id="sourceSelectPanel" style="display:none">
-        <label for="sourceSelect">Change video source:</label>
-        <select id="sourceSelect" style="max-width:400px">
-        </select>
-      </div>
+  let stream = null;
+  let scanTimer = null;
+  const SCAN_INTERVAL_MS = 150; // ajustar para velocidad/CPU
 
-      <label>Result:</label>
-      <pre><code id="result"></code></pre>
+  async function startCamera() {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    await video.play();
+  }
 
-      <p>See the <a href="https://github.com/zxing-js/library/tree/master/docs/examples/multi-camera/">source code</a>
-        for this example.</p>
-    </section>
+  // convierte rect del overlay (en pantalla) a coordenadas del vídeo real (videoWidth/videoHeight)
+  function computeCropRect() {
+    const videoRect = video.getBoundingClientRect();
+    const overlayRect = scanArea.getBoundingClientRect();
 
-    <footer class="footer">
-      <section class="container">
-        <p>ZXing TypeScript Demo. Licensed under the <a target="_blank"
-            href="https://github.com/zxing-js/library#license" title="MIT">MIT</a>.</p>
-      </section>
-    </footer>
+    // si video no tiene dimensiones aún
+    if (!video.videoWidth || !videoRect.width) return null;
 
-  </main>
+    // escala desde coordenadas CSS a pixels del buffer del vídeo
+    const scaleX = video.videoWidth / videoRect.width;
+    const scaleY = video.videoHeight / videoRect.height;
 
-  <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
-  <script type="text/javascript">
+    const sx = Math.max(0, (overlayRect.left - videoRect.left) * scaleX);
+    const sy = Math.max(0, (overlayRect.top - videoRect.top) * scaleY);
+    const sw = Math.max(1, overlayRect.width * scaleX);
+    const sh = Math.max(1, overlayRect.height * scaleY);
 
-    var barcodeAudio = new Audio("./barcode-audio.ogg")
-    window.addEventListener('load', function () {
-      let selectedDeviceId;
-      const codeReader = new ZXing.BrowserMultiFormatReader()
-      console.log('ZXing code reader initialized')
-      codeReader.listVideoInputDevices()
-        .then((videoInputDevices) => {
-          const sourceSelect = document.getElementById('sourceSelect')
-          selectedDeviceId = videoInputDevices[0].deviceId
-          if (videoInputDevices.length >= 1) {
-            videoInputDevices.forEach((element) => {
-              const sourceOption = document.createElement('option')
-              sourceOption.text = element.label
-              sourceOption.value = element.deviceId
-              sourceSelect.appendChild(sourceOption)
-            })
+    return { sx: Math.floor(sx), sy: Math.floor(sy), sw: Math.floor(sw), sh: Math.floor(sh) };
+  }
 
-            sourceSelect.onchange = () => {
-              selectedDeviceId = sourceSelect.value;
-            };
+async function scanOnce() {
+  if (video.readyState < 2) return; // no frame listo
+  const rect = computeCropRect();
+  if (!rect) return;
 
-            const sourceSelectPanel = document.getElementById('sourceSelectPanel')
-            sourceSelectPanel.style.display = 'block'
-          }
+  const TARGET_WIDTH = 600;
+  const scaleDown = Math.min(1, TARGET_WIDTH / rect.sw);
+  const canvasW = Math.max(120, Math.floor(rect.sw * scaleDown));
+  const canvasH = Math.max(120, Math.floor(rect.sh * scaleDown));
 
-          document.getElementById('startButton').addEventListener('click', () => {
-            codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
-              if (result) {
-                //console.log(result)
-            codeReader.reset()
+  cropCanvas.width = canvasW;
+  cropCanvas.height = canvasH;
 
-                barcodeAudio.play();
-                document.getElementById('result').textContent = result.text
-                document.getElementById('result').scrollIntoView()
-              }
-              if (err && !(err instanceof ZXing.NotFoundException)) {
-                console.error(err)
-                document.getElementById('result').textContent = err
-              }
-            })
-            console.log(`Started continous decode from camera with id ${selectedDeviceId}`)
-          })
+  cropCtx.drawImage(video,
+    rect.sx, rect.sy, rect.sw, rect.sh,
+    0, 0, canvasW, canvasH
+  );
 
-          document.getElementById('resetButton').addEventListener('click', () => {
-            codeReader.reset()
-            document.getElementById('result').textContent = '';
-            console.log('Reset.')
-          })
+  try {
+    const result = await codeReader.decodeFromCanvas(cropCanvas);
+    resultEl.textContent = result.text;
+    stopScanning();
+  } catch (err) {
+    // detección segura de "NotFoundException" sin usar instanceof directo
+    const errName = err && (err.name || (err.constructor && err.constructor.name));
+    const notFoundByName = errName === 'NotFoundException' || errName === 'NotFoundExceptionError';
+    const notFoundByGlobal = (typeof ZXingBrowser !== 'undefined' && ZXingBrowser.NotFoundException && err instanceof ZXingBrowser.NotFoundException)
+      || (typeof ZXing !== 'undefined' && ZXing.NotFoundException && err instanceof ZXing.NotFoundException);
 
-        })
-        .catch((err) => {
-          console.error(err)
-        })
-    })
-  </script>
+    const isNotFound = notFoundByName || notFoundByGlobal;
 
+    if (!isNotFound) {
+      console.error('decode error:', err);
+      resultEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+    } else {
+      // no hay código en este frame -> comportamiento esperado, no mostrar error
+      // (opcional) limpia resultado si quieres:
+      // resultEl.textContent = '';
+    }
+  }
+}
+
+  function startScanningLoop() {
+    if (scanTimer) clearInterval(scanTimer);
+    scanTimer = setInterval(() => { scanOnce().catch(e=>console.error(e)); }, SCAN_INTERVAL_MS);
+    stopBtn.disabled = false;
+    startBtn.disabled = true;
+  }
+
+  function stopScanning() {
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.pause();
+    video.srcObject = null;
+  }
+
+  // botones
+  startBtn.addEventListener('click', async () => {
+    resultEl.textContent = 'Buscando...';
+    try {
+      await startCamera();
+      startScanningLoop();
+    } catch (err) {
+      console.error(err);
+      resultEl.textContent = 'No se pudo abrir la cámara: ' + err;
+    }
+  });
+
+  stopBtn.addEventListener('click', () => {
+    stopScanning();
+  });
+
+  resetBtn.addEventListener('click', () => {
+    stopScanning();
+    stopCamera();
+    resultEl.textContent = '';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  });
+
+  // cleanup on leave
+  window.addEventListener('pagehide', () => {
+    stopScanning();
+    stopCamera();
+  });
+
+})();
+</script>
 </body>
-
 </html>

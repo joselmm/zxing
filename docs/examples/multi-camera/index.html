@@ -1,193 +1,228 @@
 <!doctype html>
 <html lang="es">
+
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>ZXing - crop area example</title>
-<style>
-  body{font-family:system-ui,Arial;margin:1rem}
-  .video-wrap{position:relative; max-width:900px; margin:0 auto;}
-  video{width:100%; height:100px; display:block; background:#000; object-fit:cover;}
-  /* overlay (scan area) */
-  .scan-area{
-    position:absolute;
-    width:50%;          /* tamaño relativo al vídeo (ajusta aquí) */
-    height:28%;
-    left:50%;
-    top:50%;
-    transform:translate(-50%,-50%);
-    border:3px dashed rgba(0,255,0,0.9);
-    box-shadow: 0 0 12px rgba(0,255,0,0.15);
-    pointer-events:none;
-    box-sizing:border-box;
-  }
-  #result{font-size:1.25rem; margin-top:1rem; word-break:break-word}
-  .controls{margin-top:1rem; display:flex; gap:0.5rem}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ZXing - crop area example</title>
+  <style>
+    body {
+      font-family: system-ui, Arial;
+      margin: 1rem
+    }
+
+    .video-wrap {
+      position: relative;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    video {
+      width: 100%;
+      height: 100px;
+      display: block;
+      background: #000;
+      object-fit: cover;
+    }
+
+    /* overlay (scan area) */
+    .scan-area {
+      position: absolute;
+      width: 50%;
+      /* tamaño relativo al vídeo (ajusta aquí) */
+      height: 28%;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border: 3px dashed rgba(0, 255, 0, 0.9);
+      box-shadow: 0 0 12px rgba(0, 255, 0, 0.15);
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+
+    #result {
+      font-size: 1.25rem;
+      margin-top: 1rem;
+      word-break: break-word
+    }
+
+    .controls {
+      margin-top: 1rem;
+      display: flex;
+      gap: 0.5rem
+    }
+  </style>
 </head>
+
 <body>
 
-<h2>Escanear sólo un área (crop) con ZXing</h2>
+  <h2>Escanear sólo un área (crop) con ZXing</h2>
 
-<div class="video-wrap" id="videoWrap">
-  <video id="video" playsinline></video>
-  <div class="scan-area" id="scanArea"></div>
-</div>
+  <div class="video-wrap" id="videoWrap">
+    <video id="video" playsinline></video>
+    <div class="scan-area" id="scanArea"></div>
+  </div>
 
-<div class="controls">
-  <button id="startBtn">Start</button>
-  <button id="stopBtn" disabled>Stop</button>
-  <button id="resetBtn">Reset</button>
-</div>
+  <div class="controls">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="resetBtn">Reset</button>
+  </div>
 
-<label>Resultado:</label>
-<pre id="result"></pre>
+  <label>Resultado:</label>
+  <pre id="result"></pre>
+  
 
-<!-- ZXing browser (incluye decodeFromCanvas) -->
-<script src="https://unpkg.com/@zxing/browser@latest"></script>
-<script>
-(async () => {
-  var barcodeAudio  = new Audio("./barcode-audio.ogg");
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-  const resetBtn = document.getElementById('resetBtn');
-  const video = document.getElementById('video');
-  const scanArea = document.getElementById('scanArea');
-  const resultEl = document.getElementById('result');
 
-  // lector (BrowserMultiFormatReader usa decodeFromCanvas)
-  const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
-  // canvas offscreen para el crop
-  const cropCanvas = document.createElement('canvas');
-  const cropCtx = cropCanvas.getContext('2d');
+  <!-- ZXing browser (incluye decodeFromCanvas) -->
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+  <script>
+    window.onOpenCvReady= async function () {
+      console.log("ya cargo opencv")
+      var barcodeAudio = new Audio("./barcode-audio.ogg");
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const video = document.getElementById('video');
+      const scanArea = document.getElementById('scanArea');
+      const resultEl = document.getElementById('result');
 
-  let stream = null;
-  let scanTimer = null;
-  const SCAN_INTERVAL_MS = 500; // ajustar para velocidad/CPU
+      // lector (BrowserMultiFormatReader usa decodeFromCanvas)
+      const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
 
-  async function startCamera() {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    video.srcObject = stream;
-    await video.play();
-  }
+      // canvas offscreen para el crop
+      const cropCanvas = document.createElement('canvas');
+      const cropCtx = cropCanvas.getContext('2d');
 
-  // convierte rect del overlay (en pantalla) a coordenadas del vídeo real (videoWidth/videoHeight)
-  function computeCropRect() {
-    const videoRect = video.getBoundingClientRect();
-    const overlayRect = scanArea.getBoundingClientRect();
+      let stream = null;
+      let scanTimer = null;
+      const SCAN_INTERVAL_MS = 500; // ajustar para velocidad/CPU
 
-    // si video no tiene dimensiones aún
-    if (!video.videoWidth || !videoRect.width) return null;
+      async function startCamera() {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        await video.play();
+      }
 
-    // escala desde coordenadas CSS a pixels del buffer del vídeo
-    const scaleX = video.videoWidth / videoRect.width;
-    const scaleY = video.videoHeight / videoRect.height;
+      // convierte rect del overlay (en pantalla) a coordenadas del vídeo real (videoWidth/videoHeight)
+      function computeCropRect() {
+        const videoRect = video.getBoundingClientRect();
+        const overlayRect = scanArea.getBoundingClientRect();
 
-    const sx = Math.max(0, (overlayRect.left - videoRect.left) * scaleX);
-    const sy = Math.max(0, (overlayRect.top - videoRect.top) * scaleY);
-    const sw = Math.max(1, overlayRect.width * scaleX);
-    const sh = Math.max(1, overlayRect.height * scaleY);
+        // si video no tiene dimensiones aún
+        if (!video.videoWidth || !videoRect.width) return null;
 
-    return { sx: Math.floor(sx), sy: Math.floor(sy), sw: Math.floor(sw), sh: Math.floor(sh) };
-  }
+        // escala desde coordenadas CSS a pixels del buffer del vídeo
+        const scaleX = video.videoWidth / videoRect.width;
+        const scaleY = video.videoHeight / videoRect.height;
 
-async function scanOnce() {
-  if (video.readyState < 2) return; // no frame listo
-  const rect = computeCropRect();
-  if (!rect) return;
+        const sx = Math.max(0, (overlayRect.left - videoRect.left) * scaleX);
+        const sy = Math.max(0, (overlayRect.top - videoRect.top) * scaleY);
+        const sw = Math.max(1, overlayRect.width * scaleX);
+        const sh = Math.max(1, overlayRect.height * scaleY);
 
-  const TARGET_WIDTH = 600;
-  const scaleDown = Math.min(1, TARGET_WIDTH / rect.sw);
-  const canvasW = Math.max(120, Math.floor(rect.sw * scaleDown));
-  const canvasH = Math.max(120, Math.floor(rect.sh * scaleDown));
+        return { sx: Math.floor(sx), sy: Math.floor(sy), sw: Math.floor(sw), sh: Math.floor(sh) };
+      }
 
-  cropCanvas.width = canvasW;
-  cropCanvas.height = canvasH;
+      async function scanOnce() {
+        if (video.readyState < 2) return; // no frame listo
+        const rect = computeCropRect();
+        if (!rect) return;
 
-  cropCtx.drawImage(video,
-    rect.sx, rect.sy, rect.sw, rect.sh,
-    0, 0, canvasW, canvasH
-  );
+        const TARGET_WIDTH = 600;
+        const scaleDown = Math.min(1, TARGET_WIDTH / rect.sw);
+        const canvasW = Math.max(120, Math.floor(rect.sw * scaleDown));
+        const canvasH = Math.max(120, Math.floor(rect.sh * scaleDown));
 
-  try {
-    const result = await codeReader.decodeFromCanvas(cropCanvas);
-    resultEl.textContent = result.text;
-    barcodeAudio.play();
-    stopScanning();
-  } catch (err) {
-    // detección segura de "NotFoundException" sin usar instanceof directo
-    const errName = err && (err.name || (err.constructor && err.constructor.name));
-    const notFoundByName = errName === 'NotFoundException' || errName === 'NotFoundExceptionError';
-    const notFoundByGlobal = (typeof ZXingBrowser !== 'undefined' && ZXingBrowser.NotFoundException && err instanceof ZXingBrowser.NotFoundException)
-      || (typeof ZXing !== 'undefined' && ZXing.NotFoundException && err instanceof ZXing.NotFoundException);
+        cropCanvas.width = canvasW;
+        cropCanvas.height = canvasH;
 
-    const isNotFound = notFoundByName || notFoundByGlobal;
+        cropCtx.drawImage(video,
+          rect.sx, rect.sy, rect.sw, rect.sh,
+          0, 0, canvasW, canvasH
+        );
 
-    if (!isNotFound) {
-      console.error('decode error:', err);
-      resultEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-    } else {
-      // no hay código en este frame -> comportamiento esperado, no mostrar error
-      // (opcional) limpia resultado si quieres:
-      // resultEl.textContent = '';
-    }
-  }
-}
+        try {
+          const result = await codeReader.decodeFromCanvas(cropCanvas);
+          resultEl.textContent = result.text;
+          barcodeAudio.play();
+          stopScanning();
+        } catch (err) {
+          // detección segura de "NotFoundException" sin usar instanceof directo
+          const errName = err && (err.name || (err.constructor && err.constructor.name));
+          const notFoundByName = errName === 'NotFoundException' || errName === 'NotFoundExceptionError';
+          const notFoundByGlobal = (typeof ZXingBrowser !== 'undefined' && ZXingBrowser.NotFoundException && err instanceof ZXingBrowser.NotFoundException)
+            || (typeof ZXing !== 'undefined' && ZXing.NotFoundException && err instanceof ZXing.NotFoundException);
 
-  function startScanningLoop() {
-    if (scanTimer) clearInterval(scanTimer);
-    scanTimer = setInterval(() => { scanOnce().catch(e=>console.error(e)); }, SCAN_INTERVAL_MS);
-    stopBtn.disabled = false;
-    startBtn.disabled = true;
-  }
+          const isNotFound = notFoundByName || notFoundByGlobal;
 
-  function stopScanning() {
-    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
-    stopBtn.disabled = true;
-    startBtn.disabled = false;
-  }
+          if (!isNotFound) {
+            console.error('decode error:', err);
+            resultEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+          } else {
+            // no hay código en este frame -> comportamiento esperado, no mostrar error
+            // (opcional) limpia resultado si quieres:
+            // resultEl.textContent = '';
+          }
+        }
+      }
 
-  function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    video.pause();
-    video.srcObject = null;
-  }
+      function startScanningLoop() {
+        if (scanTimer) clearInterval(scanTimer);
+        scanTimer = setInterval(() => { scanOnce().catch(e => console.error(e)); }, SCAN_INTERVAL_MS);
+        stopBtn.disabled = false;
+        startBtn.disabled = true;
+      }
 
-  // botones
-  startBtn.addEventListener('click', async () => {
-    resultEl.textContent = 'Buscando...';
-    try {
-      await startCamera();
-      startScanningLoop();
-    } catch (err) {
-      console.error(err);
-      resultEl.textContent = 'No se pudo abrir la cámara: ' + err;
-    }
-  });
+      function stopScanning() {
+        if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+      }
 
-  stopBtn.addEventListener('click', () => {
-    stopScanning();
-  });
+      function stopCamera() {
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        video.pause();
+        video.srcObject = null;
+      }
 
-  resetBtn.addEventListener('click', () => {
-    stopScanning();
-    stopCamera();
-    resultEl.textContent = '';
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-  });
+      // botones
+      startBtn.addEventListener('click', async () => {
+        resultEl.textContent = 'Buscando...';
+        try {
+          await startCamera();
+          startScanningLoop();
+        } catch (err) {
+          console.error(err);
+          resultEl.textContent = 'No se pudo abrir la cámara: ' + err;
+        }
+      });
 
-  // cleanup on leave
-  window.addEventListener('pagehide', () => {
-    stopScanning();
-    stopCamera();
-  });
+      stopBtn.addEventListener('click', () => {
+        stopScanning();
+      });
 
-})();
-</script>
+      resetBtn.addEventListener('click', () => {
+        stopScanning();
+        stopCamera();
+        resultEl.textContent = '';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      });
+
+      // cleanup on leave
+      window.addEventListener('pagehide', () => {
+        stopScanning();
+        stopCamera();
+      });
+
+    };
+  </script>
+  <script async src="opencv.js" onload="window.onOpenCvReady();" type="text/javascript"></script>
 </body>
+
 </html>

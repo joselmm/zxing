@@ -68,18 +68,34 @@
     <button id="stopBtn" disabled>Stop</button>
     <button id="resetBtn">Reset</button>
   </div>
+  <label style="margin-left:0.5rem">
+    Efecto:
+    <select id="effectMode">
+      <option value="none">Original</option>
+      <option value="adaptive">Adaptive B/W</option>
+      <option value="magic">Magic Color</option>
+    </select>
+  </label>
+  <label style="margin-left:0.5rem">
+    <input type="checkbox" id="useProcessedForDecode" />
+    Usar procesado para ZXing
+  </label>
+
+  <!-- preview pequeño del resultado procesado -->
+  <canvas id="processedCanvas" style="display:block; max-width:300px; margin-top:.5rem; border:1px solid #ccc"></canvas>
+
 
   <label>Resultado:</label>
   <pre id="result"></pre>
-  
+
 
 
 
   <!-- ZXing browser (incluye decodeFromCanvas) -->
   <script src="https://unpkg.com/@zxing/browser@latest"></script>
   <script>
-    window.onOpenCvReady= async function () {
-      console.log("ya cargo opencv")
+    window.onOpenCvReady = async function () {
+      console.log("OpenCV cargado");
       var barcodeAudio = new Audio("./barcode-audio.ogg");
       const startBtn = document.getElementById('startBtn');
       const stopBtn = document.getElementById('stopBtn');
@@ -87,6 +103,7 @@
       const video = document.getElementById('video');
       const scanArea = document.getElementById('scanArea');
       const resultEl = document.getElementById('result');
+      const processedCanvas = document.getElementById('processedCanvas');
 
       // lector (BrowserMultiFormatReader usa decodeFromCanvas)
       const codeReader = new ZXingBrowser.BrowserMultiFormatReader();
@@ -105,15 +122,12 @@
         await video.play();
       }
 
-      // convierte rect del overlay (en pantalla) a coordenadas del vídeo real (videoWidth/videoHeight)
       function computeCropRect() {
         const videoRect = video.getBoundingClientRect();
         const overlayRect = scanArea.getBoundingClientRect();
 
-        // si video no tiene dimensiones aún
         if (!video.videoWidth || !videoRect.width) return null;
 
-        // escala desde coordenadas CSS a pixels del buffer del vídeo
         const scaleX = video.videoWidth / videoRect.width;
         const scaleY = video.videoHeight / videoRect.height;
 
@@ -125,6 +139,7 @@
         return { sx: Math.floor(sx), sy: Math.floor(sy), sw: Math.floor(sw), sh: Math.floor(sh) };
       }
 
+      // ---------- SCAN: dibuja, procesa, espera paint y luego decodifica ----------
       async function scanOnce() {
         if (video.readyState < 2) return; // no frame listo
         const rect = computeCropRect();
@@ -135,34 +150,74 @@
         const canvasW = Math.max(120, Math.floor(rect.sw * scaleDown));
         const canvasH = Math.max(120, Math.floor(rect.sh * scaleDown));
 
+        // dibujar recorte en canvas offscreen
         cropCanvas.width = canvasW;
         cropCanvas.height = canvasH;
-
         cropCtx.drawImage(video,
           rect.sx, rect.sy, rect.sw, rect.sh,
           0, 0, canvasW, canvasH
         );
 
+        // preparar canvas visible (preview)
+        processedCanvas.width = canvasW;
+        processedCanvas.height = canvasH;
+
+        const effect = document.getElementById('effectMode').value;
+        const useProcessed = document.getElementById('useProcessedForDecode').checked;
+
+        // aplicar efecto (si está disponible), o copiar si no
         try {
-          const result = await codeReader.decodeFromCanvas(cropCanvas);
+          if ((effect === 'adaptive' || effect === 'magic') && typeof cv === 'undefined') {
+            // OpenCV no disponible -> fallback a copia
+            const ctx = processedCanvas.getContext('2d');
+            ctx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+            ctx.drawImage(cropCanvas, 0, 0);
+          } else {
+            if (effect === 'adaptive') {
+              applyAdaptiveThresholdToCanvas(cropCanvas, processedCanvas, 25, 8);
+            } else if (effect === 'magic') {
+              applyMagicColorToCanvas(cropCanvas, processedCanvas, 51, 1.15);
+            } else {
+              const ctx = processedCanvas.getContext('2d');
+              ctx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+              ctx.drawImage(cropCanvas, 0, 0);
+            }
+          }
+        } catch (procErr) {
+          console.error('Error aplicando efecto:', procErr);
+          // en caso de error, muestra el crop original
+          const ctx = processedCanvas.getContext('2d');
+          ctx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+          ctx.drawImage(cropCanvas, 0, 0);
+        }
+
+        // ---- IMPORTANTE: espera a la siguiente animación para que el preview se pinte ----
+        await new Promise(r => requestAnimationFrame(() => r())); // asegura que processedCanvas ya es visible
+
+        // opcional: muestra texto breve en el preview o en resultEl mientras se decodifica
+        // resultEl.textContent = 'Preview mostrado. Decodificando...';
+
+        // Decodificar desde el canvas elegido (processed o crop)
+        const canvasForDecode = useProcessed ? processedCanvas : cropCanvas;
+        try {
+          const result = await codeReader.decodeFromCanvas(canvasForDecode);
           resultEl.textContent = result.text;
           barcodeAudio.play();
           stopScanning();
         } catch (err) {
-          // detección segura de "NotFoundException" sin usar instanceof directo
+          // manejo robusto de NotFoundException (como tenías)
           const errName = err && (err.name || (err.constructor && err.constructor.name));
           const notFoundByName = errName === 'NotFoundException' || errName === 'NotFoundExceptionError';
           const notFoundByGlobal = (typeof ZXingBrowser !== 'undefined' && ZXingBrowser.NotFoundException && err instanceof ZXingBrowser.NotFoundException)
             || (typeof ZXing !== 'undefined' && ZXing.NotFoundException && err instanceof ZXing.NotFoundException);
-
           const isNotFound = notFoundByName || notFoundByGlobal;
 
           if (!isNotFound) {
             console.error('decode error:', err);
             resultEl.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
           } else {
-            // no hay código en este frame -> comportamiento esperado, no mostrar error
-            // (opcional) limpia resultado si quieres:
+            // no hay código en este frame -> comportamiento esperado
+            // (no sobreescribir el preview, opcional: limpiar resultado si quieres)
             // resultEl.textContent = '';
           }
         }
@@ -220,8 +275,106 @@
         stopCamera();
       });
 
-    };
+      // ------------------ HELPERS (OpenCV) ------------------
+
+      function applyAdaptiveThresholdToCanvas(srcCanvas, dstCanvas, blockSize = 25, C = 8) {
+        if (!cv || typeof cv === 'undefined') {
+          // fallback: copia simple
+          const ctx = dstCanvas.getContext('2d');
+          ctx.clearRect(0, 0, dstCanvas.width, dstCanvas.height);
+          ctx.drawImage(srcCanvas, 0, 0);
+          return;
+        }
+        if (blockSize % 2 === 0) blockSize++;
+
+        let src = cv.imread(srcCanvas); // RGBA
+        let gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+        let blur = new cv.Mat();
+        cv.GaussianBlur(gray, blur, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
+
+        let dst = new cv.Mat();
+        cv.adaptiveThreshold(blur, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, blockSize, C);
+
+        cv.imshow(dstCanvas, dst);
+
+        src.delete(); gray.delete(); blur.delete(); dst.delete();
+      }
+
+      function applyMagicColorToCanvas(srcCanvas, dstCanvas, blurK = 51, satFactor = 1.15) {
+        if (!cv || typeof cv === 'undefined') {
+          const ctx = dstCanvas.getContext('2d');
+          ctx.clearRect(0, 0, dstCanvas.width, dstCanvas.height);
+          ctx.drawImage(srcCanvas, 0, 0);
+          return;
+        }
+        if (blurK % 2 === 0) blurK++;
+
+        let src = cv.imread(srcCanvas);                    // RGBA
+        let rgb = new cv.Mat();
+        cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);         // RGB
+
+        let field = new cv.Mat();
+        cv.medianBlur(rgb, field, blurK);
+
+        let src32 = new cv.Mat();
+        let field32 = new cv.Mat();
+        rgb.convertTo(src32, cv.CV_32F);
+        field.convertTo(field32, cv.CV_32F);
+
+        const meanScalar = cv.mean(field); // [r,g,b,a]
+        let meanMat = new cv.Mat(src.rows, src.cols, rgb.type(), meanScalar);
+        let mean32 = new cv.Mat();
+        meanMat.convertTo(mean32, cv.CV_32F);
+
+        let mult = new cv.Mat();
+        cv.multiply(src32, mean32, mult);
+
+        let corrected = new cv.Mat();
+        cv.divide(mult, field32, corrected);
+
+        let corrected8 = new cv.Mat();
+        corrected.convertTo(corrected8, cv.CV_8U);
+
+        // equalize L channel
+        let lab = new cv.Mat();
+        cv.cvtColor(corrected8, lab, cv.COLOR_RGB2Lab);
+        let channels = new cv.MatVector();
+        cv.split(lab, channels);
+        let L = channels.get(0);
+        cv.equalizeHist(L, L);
+        channels.set(0, L);
+        cv.merge(channels, lab);
+        let enhanced = new cv.Mat();
+        cv.cvtColor(lab, enhanced, cv.COLOR_Lab2RGB);
+
+        // boost saturation
+        let hsv = new cv.Mat();
+        cv.cvtColor(enhanced, hsv, cv.COLOR_RGB2HSV);
+        let hsvCh = new cv.MatVector();
+        cv.split(hsv, hsvCh);
+        let S = hsvCh.get(1);
+        let S2 = new cv.Mat();
+        S.convertTo(S2, cv.CV_8U, satFactor, 0);
+        hsvCh.set(1, S2);
+        cv.merge(hsvCh, hsv);
+        let finalMat = new cv.Mat();
+        cv.cvtColor(hsv, finalMat, cv.COLOR_HSV2RGB);
+
+        cv.imshow(dstCanvas, finalMat);
+
+        // cleanup
+        src.delete(); rgb.delete(); field.delete();
+        src32.delete(); field32.delete(); meanMat.delete(); mean32.delete();
+        mult.delete(); corrected.delete(); corrected8.delete();
+        lab.delete(); channels.delete(); L.delete(); enhanced.delete();
+        hsv.delete(); hsvCh.delete(); S.delete(); S2.delete(); finalMat.delete();
+      }
+
+    }; // fin onOpenCvReady
   </script>
+
   <script async src="opencv.js" onload="window.onOpenCvReady();" type="text/javascript"></script>
 </body>
 
